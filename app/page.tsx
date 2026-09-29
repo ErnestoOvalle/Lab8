@@ -1,69 +1,147 @@
-import Image from "next/image";
+'use client'
+import { useEffect, useState } from 'react'
+import { addDoc, collection, getDocs, deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { db } from '../firebase/firebase.config';
+
+type Auto = {
+  id: string;
+  marca: string;
+  modelo: string;
+  anio: number;
+  caballosFuerza: number;
+  precio: number;
+}
+
+// Datos del formulario, sin id (Firestore lo genera)
+type AutoForm = Omit<Auto, 'id'>;
+
+// Lee toda la colección de Firestore
+const cargarAutos = async (): Promise<Auto[]> => {
+  const snapshot = await getDocs(collection(db, 'autos'))
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...(doc.data() as AutoForm) }))
+}
+
+const formVacio: AutoForm = { marca: '', modelo: '', anio: 2024, caballosFuerza: 0, precio: 0 };
 
 export default function Home() {
+  const [form, setForm] = useState<AutoForm>(formVacio);
+  const [autos, setAutos] = useState<Auto[]>([]);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [cargando, setCargando] = useState(false);
+
+  useEffect(() => {
+    cargarAutos().then(setAutos).catch((e) => setError(String(e)))
+  }, [])
+
+  // Ejecuta una operación de Firestore mostrando estado de carga y errores
+  const ejecutar = async (op: () => Promise<void>) => {
+    setCargando(true);
+    setError(null);
+    try {
+      await op();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  const handleSubmit = () => ejecutar(async () => {
+    if (!form.marca.trim() || !form.modelo.trim()) return;
+    if (editandoId) {
+      await updateDoc(doc(db, 'autos', editandoId), form)
+      setAutos((prev) => prev.map((a) => a.id === editandoId ? { id: editandoId, ...form } : a));
+    } else {
+      const ref = await addDoc(collection(db, 'autos'), form)
+      setAutos((prev) => [...prev, { id: ref.id, ...form }]);
+    }
+    setForm(formVacio);
+    setEditandoId(null);
+  })
+
+  const handleEdit = (auto: Auto) => {
+    const { id, ...datos } = auto;
+    setForm(datos);
+    setEditandoId(id);
+  }
+
+  const handleDelete = (id: string) => ejecutar(async () => {
+    if (!id) return;
+    await deleteDoc(doc(db, 'autos', id));
+    setAutos((prev) => prev.filter((a) => a.id !== id));
+    if (editandoId === id) { setForm(formVacio); setEditandoId(null); }
+  })
+
+  const cancelarEdicion = () => {
+    setForm(formVacio);
+    setEditandoId(null);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="font-sans min-h-screen p-8 sm:p-20 flex flex-col gap-8 items-center">
+      <h1 className="text-2xl font-bold">Catálogo de Autos Deportivos</h1>
+
+      <div className="flex flex-wrap gap-2 items-end">
+        <label className="flex flex-col text-sm">Marca
+          <input type="text" className="border-2 p-1" value={form.marca}
+            onChange={(e) => setForm({ ...form, marca: e.target.value })} />
+        </label>
+        <label className="flex flex-col text-sm">Modelo
+          <input type="text" className="border-2 p-1" value={form.modelo}
+            onChange={(e) => setForm({ ...form, modelo: e.target.value })} />
+        </label>
+        <label className="flex flex-col text-sm">Año
+          <input type="number" className="border-2 p-1 w-24" value={form.anio}
+            onChange={(e) => setForm({ ...form, anio: Number(e.target.value) })} />
+        </label>
+        <label className="flex flex-col text-sm">HP
+          <input type="number" className="border-2 p-1 w-24" value={form.caballosFuerza}
+            onChange={(e) => setForm({ ...form, caballosFuerza: Number(e.target.value) })} />
+        </label>
+        <label className="flex flex-col text-sm">Precio (USD)
+          <input type="number" className="border-2 p-1 w-32" value={form.precio}
+            onChange={(e) => setForm({ ...form, precio: Number(e.target.value) })} />
+        </label>
+        <button className="border p-2 bg-blue-600 text-white cursor-pointer disabled:opacity-50" onClick={handleSubmit} disabled={cargando}>
+          {cargando ? 'Guardando...' : editandoId ? 'Guardar cambios' : 'Agregar'}
+        </button>
+        {editandoId && (
+          <button className="border p-2 cursor-pointer" onClick={cancelarEdicion}>Cancelar</button>
+        )}
+      </div>
+
+      {error && <p className="text-red-500 max-w-xl text-sm">Error de Firestore: {error}</p>}
+
+      <table className="border-collapse">
+        <thead>
+          <tr>
+            <th className="border p-2">Marca</th>
+            <th className="border p-2">Modelo</th>
+            <th className="border p-2">Año</th>
+            <th className="border p-2">HP</th>
+            <th className="border p-2">Precio</th>
+            <th className="border p-2">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {autos.map((auto) => (
+            <tr key={auto.id}>
+              <td className="border p-2">{auto.marca}</td>
+              <td className="border p-2">{auto.modelo}</td>
+              <td className="border p-2">{auto.anio}</td>
+              <td className="border p-2">{auto.caballosFuerza}</td>
+              <td className="border p-2">${auto.precio.toLocaleString()}</td>
+              <td className="border p-2 flex gap-1">
+                <button className="p-2 border bg-yellow-500 text-white cursor-pointer"
+                  onClick={() => handleEdit(auto)}>Editar</button>
+                <button className="p-2 border bg-red-500 text-white cursor-pointer"
+                  onClick={() => handleDelete(auto.id)}>Eliminar</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
